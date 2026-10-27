@@ -1,0 +1,329 @@
+const defaultLanguages = [
+  { code: 'en', name: 'English' },
+  { code: 'te', name: 'Telugu' },
+  { code: 'ta', name: 'Tamil' },
+  { code: 'hi', name: 'Hindi' },
+  { code: 'es', name: 'Spanish' },
+  { code: 'fr', name: 'French' },
+  { code: 'de', name: 'German' },
+  { code: 'ar', name: 'Arabic' }
+];
+
+const state = {
+  languages: [...defaultLanguages],
+  conversationDirection: 'a-to-b',
+  conversationHistory: []
+};
+
+const sourceLanguageEl = document.getElementById('source-language');
+const targetLanguageEl = document.getElementById('target-language');
+const sourceTextEl = document.getElementById('source-text');
+const translatedOutputEl = document.getElementById('translated-output');
+const statusMessageEl = document.getElementById('status-message');
+const translateBtn = document.getElementById('translate-btn');
+const copyBtn = document.getElementById('copy-btn');
+const clearBtn = document.getElementById('clear-btn');
+const speakBtn = document.getElementById('speak-btn');
+
+const speakerOneLangEl = document.getElementById('speaker-one-language');
+const speakerTwoLangEl = document.getElementById('speaker-two-language');
+const conversationInputEl = document.getElementById('conversation-input');
+const conversationHistoryEl = document.getElementById('conversation-history');
+const sendConversationBtn = document.getElementById('conversation-send-btn');
+const clearConversationBtn = document.getElementById('conversation-clear-btn');
+const directionLabelEl = document.getElementById('direction-label');
+const directionToggleBtn = document.getElementById('direction-toggle-btn');
+
+function setStatus(message, type = 'info') {
+  if (!statusMessageEl) return;
+  statusMessageEl.textContent = message;
+  statusMessageEl.className = `status-message ${type}`;
+}
+
+function populateLanguageOptions() {
+  const allOptions = state.languages.length ? state.languages : defaultLanguages;
+
+  const buildOptions = (selectEl, selectedCode) => {
+    selectEl.innerHTML = allOptions
+      .map((language) => `<option value="${language.code}">${language.name}</option>`)
+      .join('');
+
+    const safe = allOptions.some((language) => language.code === selectedCode)
+      ? selectedCode
+      : allOptions[0]?.code || 'en';
+
+    selectEl.value = safe;
+  };
+
+  buildOptions(sourceLanguageEl, 'en');
+  buildOptions(targetLanguageEl, 'te');
+  buildOptions(speakerOneLangEl, 'en');
+  buildOptions(speakerTwoLangEl, 'te');
+}
+
+async function loadLanguages() {
+  try {
+    const response = await fetch('/api/languages');
+    if (!response.ok) {
+      throw new Error('Unable to fetch current language list.');
+    }
+
+    const languages = await response.json();
+    if (Array.isArray(languages) && languages.length > 0) {
+      state.languages = languages;
+      populateLanguageOptions();
+    }
+  } catch (error) {
+    console.warn('Using default supported languages:', error.message);
+    state.languages = [...defaultLanguages];
+    populateLanguageOptions();
+  }
+}
+
+function addSwapButtonBehavior() {
+  const button = document.getElementById('swap-languages');
+  button?.addEventListener('click', () => {
+    const sourceValue = sourceLanguageEl.value;
+    sourceLanguageEl.value = targetLanguageEl.value;
+    targetLanguageEl.value = sourceValue;
+    setStatus('Languages swapped successfully.', 'success');
+  });
+}
+
+function timeoutFetch(url, options = {}, timeout = 20000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+
+  return fetch(url, { ...options, signal: controller.signal })
+    .finally(() => clearTimeout(timer));
+}
+
+async function callTranslateApi(payload) {
+  const response = await timeoutFetch('/api/translate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }, 25000);
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Translation request failed.');
+  }
+
+  return data;
+}
+
+async function handleTranslateSubmit(event) {
+  event.preventDefault();
+  const text = sourceTextEl.value.trim();
+
+  if (!text) {
+    setStatus('Please type a sentence before translating.', 'error');
+    sourceTextEl.focus();
+    return;
+  }
+
+  translateBtn.disabled = true;
+  setStatus('Translating your text...', 'info');
+
+  try {
+    const response = await callTranslateApi({
+      q: text,
+      source: sourceLanguageEl.value,
+      target: targetLanguageEl.value
+    });
+
+    translatedOutputEl.value = response.translatedText || '';
+    setStatus('Translation completed successfully.', 'success');
+  } catch (error) {
+    console.error(error);
+    setStatus(error.message || 'Translation failed. Please try again.', 'error');
+  } finally {
+    translateBtn.disabled = false;
+  }
+}
+
+async function copyTranslation() {
+  const value = translatedOutputEl.value.trim();
+
+  if (!value) {
+    setStatus('There is no translated text to copy yet.', 'error');
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(value);
+    setStatus('Translation copied to the clipboard.', 'success');
+  } catch (error) {
+    console.error(error);
+    setStatus('Clipboard access failed. You can copy the text manually.', 'error');
+  }
+}
+
+function clearTranslationFields() {
+  sourceTextEl.value = '';
+  translatedOutputEl.value = '';
+  setStatus('Input and output cleared.', 'info');
+  sourceTextEl.focus();
+}
+
+function speakTranslatedText() {
+  const text = translatedOutputEl.value.trim();
+
+  if (!text) {
+    setStatus('Translate a sentence before trying speech playback.', 'error');
+    return;
+  }
+
+  if (!('speechSynthesis' in window)) {
+    setStatus('Speech playback is not supported in this browser.', 'error');
+    return;
+  }
+
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = targetLanguageEl.value || 'en';
+  utterance.rate = 0.95;
+  window.speechSynthesis.speak(utterance);
+  setStatus('Playing translated audio.', 'success');
+}
+
+function startVoiceInput(targetElement) {
+  const SpeechRecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  if (!SpeechRecognitionClass) {
+    setStatus('Microphone input is not supported in this browser.', 'error');
+    return;
+  }
+
+  const recognition = new SpeechRecognitionClass();
+  recognition.lang = sourceLanguageEl.value || 'en-US';
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+
+  recognition.onresult = (event) => {
+    const transcript = event.results[0][0].transcript;
+    targetElement.value = transcript;
+    setStatus('Voice input captured successfully.', 'success');
+  };
+
+  recognition.onerror = () => {
+    setStatus('Microphone permission or speech recognition failed.', 'error');
+  };
+
+  recognition.onend = () => {
+    setStatus('Voice recognition session ended.', 'info');
+  };
+
+  recognition.start();
+}
+
+function getConversationSourceAndTarget() {
+  const sourceCode = speakerOneLangEl.value;
+  const targetCode = speakerTwoLangEl.value;
+
+  if (state.conversationDirection === 'b-to-a') {
+    return {
+      source: targetCode,
+      target: sourceCode,
+      label: `${speakerTwoLangEl.options[speakerTwoLangEl.selectedIndex].text} → ${speakerOneLangEl.options[speakerOneLangEl.selectedIndex].text}`
+    };
+  }
+
+  return {
+    source: sourceCode,
+    target: targetCode,
+    label: `${speakerOneLangEl.options[speakerOneLangEl.selectedIndex].text} → ${speakerTwoLangEl.options[speakerTwoLangEl.selectedIndex].text}`
+  };
+}
+
+function renderConversation() {
+  if (!state.conversationHistory.length) {
+    conversationHistoryEl.innerHTML = '<div class="empty-state">No messages yet. Start your conversation below.</div>';
+    return;
+  }
+
+  conversationHistoryEl.innerHTML = state.conversationHistory
+    .map(
+      (entry) => `
+        <div class="chat-card">
+          <small>${entry.fromLanguage} → ${entry.toLanguage}</small>
+          <p><strong>Original:</strong> ${entry.original}</p>
+          <p class="translated"><strong>Translated:</strong> ${entry.translated}</p>
+        </div>
+      `
+    )
+    .join('');
+}
+
+function toggleConversationDirection() {
+  state.conversationDirection = state.conversationDirection === 'a-to-b' ? 'b-to-a' : 'a-to-b';
+  const direction = state.conversationDirection === 'a-to-b' ? 'A → B' : 'B → A';
+  directionLabelEl.textContent = direction;
+  directionToggleBtn.textContent = state.conversationDirection === 'a-to-b' ? 'Switch to B → A' : 'Switch to A → B';
+  setStatus(`Conversation direction changed to ${direction}.`, 'info');
+}
+
+async function handleConversationSend() {
+  const text = conversationInputEl.value.trim();
+  if (!text) {
+    setStatus('Please enter a message for the conversation.', 'error');
+    conversationInputEl.focus();
+    return;
+  }
+
+  const { source, target, label } = getConversationSourceAndTarget();
+
+  try {
+    const response = await callTranslateApi({
+      q: text,
+      source,
+      target
+    });
+
+    const entry = {
+      original: text,
+      translated: response.translatedText || '',
+      fromLanguage: label,
+      toLanguage: 'Translated'
+    };
+
+    state.conversationHistory.push(entry);
+    renderConversation();
+    conversationInputEl.value = '';
+    setStatus('Conversation message translated successfully.', 'success');
+  } catch (error) {
+    console.error(error);
+    setStatus(error.message || 'The conversation translation failed.', 'error');
+  }
+}
+
+function clearConversationHistory() {
+  state.conversationHistory = [];
+  renderConversation();
+  setStatus('Conversation history cleared.', 'info');
+}
+
+function registerEvents() {
+  document.getElementById('translate-form').addEventListener('submit', handleTranslateSubmit);
+  document.getElementById('swap-languages').addEventListener('click', addSwapButtonBehavior);
+  copyBtn.addEventListener('click', copyTranslation);
+  clearBtn.addEventListener('click', clearTranslationFields);
+  speakBtn.addEventListener('click', speakTranslatedText);
+  document.getElementById('voice-input-btn').addEventListener('click', () => startVoiceInput(sourceTextEl));
+  document.getElementById('conversation-voice-btn').addEventListener('click', () => startVoiceInput(conversationInputEl));
+  sendConversationBtn.addEventListener('click', handleConversationSend);
+  clearConversationBtn.addEventListener('click', clearConversationHistory);
+  directionToggleBtn.addEventListener('click', toggleConversationDirection);
+}
+
+async function init() {
+  populateLanguageOptions();
+  registerEvents();
+  renderConversation();
+  await loadLanguages();
+  setStatus('Ready to translate. Choose a language pair and begin.', 'info');
+}
+
+init();

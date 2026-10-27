@@ -1,0 +1,26 @@
+{
+  "name": "real-time-translator",
+  "version": "1.0.0",
+  "description": "Responsive real-time translator with text translation, conversation mode, and browser voice support.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [
+    "translator",
+    "translation",
+    "express",
+    "javascript",
+    "education",
+    "project"
+  ],
+  "author": "saps27",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
